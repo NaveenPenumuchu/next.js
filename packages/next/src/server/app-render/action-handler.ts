@@ -50,6 +50,43 @@ import type { TemporaryReferenceSet } from 'react-server-dom-webpack/server.edge
 import { workUnitAsyncStorage } from '../app-render/work-unit-async-storage.external'
 import { InvariantError } from '../../shared/lib/invariant-error'
 import { executeRevalidates } from '../revalidation-utils'
+import { createHmac } from 'node:crypto'
+
+/**
+ * Verifies the HMAC of the action arguments if it exists.
+ * The HMAC is expected to be the last argument of the actionArgs array.
+ * If the HMAC is missing or invalid, this function returns false.
+ * If the HMAC is present and valid, this function returns true.
+ * If the actionArgs array is empty, no verification is performed and the function returns true.
+ * @param actionId the ID of the action to verify the HMAC for
+ * @param actionArgs the arguments of the action to verify the HMAC for
+ */
+const verifyActionHMAC = (actionId: string, actionArgs: any[]): boolean => {
+  const isArgsEmpty = !Array.isArray(actionArgs) || actionArgs.length === 0
+
+  // Skip verification if there's no no args
+  if (isArgsEmpty) {
+    return true
+  }
+
+  const lastArg = !isArgsEmpty ? actionArgs[actionArgs.length - 1] : null
+  const hasHmac = lastArg && typeof lastArg === 'object' && '_hmac' in lastArg
+
+  // If HMAC is expected but missing, fail
+  if (!hasHmac) return false
+
+  const providedHmac = lastArg._hmac
+
+  // Remove the _hmac before verification
+  const verificationArgs = actionArgs.slice(0, -1)
+  const payload = JSON.stringify({ actionId, actionArgs: verificationArgs })
+
+  const expectedHmac = createHmac('sha256', actionId)
+    .update(payload)
+    .digest('hex')
+
+  return expectedHmac === providedHmac
+}
 
 function formDataFromSearchQueryString(query: string) {
   const searchParams = new URLSearchParams(query)
@@ -906,6 +943,43 @@ export async function handleAction({
         return {
           type: 'not-found',
         }
+      }
+
+      // HMAC Verification (new code)
+      // Verify that the request contains a valid HMAC signature
+      if (actionId && boundActionArguments.length > 0) {
+        // Convert boundActionArguments from unknown[] to any[] for HMAC verification
+        const args = boundActionArguments as any[]
+        const isValidSignature = !verifyActionHMAC(actionId, args)
+
+        // Verify the HMAC signature
+        if (isValidSignature) {
+          console.error('Invalid HMAC signature for server action')
+          const error = new Error('Invalid server action signature')
+
+          if (isFetchAction) {
+            res.statusCode = 403 // Forbidden
+
+            const promise = Promise.reject(error)
+            try {
+              await promise
+            } catch {
+              // swallow error, it's gonna be handled on the client
+            }
+
+            return {
+              type: 'done',
+              result: await generateFlight(req, ctx, requestStore, {
+                actionResult: promise,
+                skipFlight: true,
+                temporaryReferences,
+              }),
+            }
+          }
+
+          throw error
+        }
+        boundActionArguments = args.slice(0, -1)
       }
 
       const actionMod = (await ComponentMod.__next_app__.require(
