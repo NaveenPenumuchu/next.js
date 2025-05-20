@@ -62,6 +62,8 @@ import { createHmac } from 'node:crypto'
  * @param actionArgs the arguments of the action to verify the HMAC for
  */
 const verifyActionHMAC = (actionId: string, actionArgs: any[]): boolean => {
+  console.log('verifyingActionHMAC')
+
   const isArgsEmpty = !Array.isArray(actionArgs) || actionArgs.length === 0
 
   // Skip verification if there's no no args
