@@ -50,7 +50,8 @@ import type { TemporaryReferenceSet } from 'react-server-dom-webpack/server.edge
 import { workUnitAsyncStorage } from '../app-render/work-unit-async-storage.external'
 import { InvariantError } from '../../shared/lib/invariant-error'
 import { executeRevalidates } from '../revalidation-utils'
-import { createHmac } from 'node:crypto'
+import { createHmac } from 'crypto'
+import { timingSafeEqual } from 'crypto'
 
 /**
  * Verifies the HMAC of the action arguments if it exists.
@@ -62,8 +63,6 @@ import { createHmac } from 'node:crypto'
  * @param actionArgs the arguments of the action to verify the HMAC for
  */
 const verifyActionHMAC = (actionId: string, actionArgs: any[]): boolean => {
-  console.log('verifyingActionHMAC')
-
   const isArgsEmpty = !Array.isArray(actionArgs) || actionArgs.length === 0
 
   // Skip verification if there's no no args
@@ -87,7 +86,7 @@ const verifyActionHMAC = (actionId: string, actionArgs: any[]): boolean => {
     .update(payload)
     .digest('hex')
 
-  return expectedHmac === providedHmac
+  return timingSafeEqual(Buffer.from(expectedHmac), Buffer.from(providedHmac))
 }
 
 function formDataFromSearchQueryString(query: string) {
